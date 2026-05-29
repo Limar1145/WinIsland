@@ -2,6 +2,9 @@ use std::ffi::c_char;
 
 pub type PluginHandle = *mut std::ffi::c_void;
 
+#[cfg(feature = "packager")]
+pub mod packager;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginType {
     Content = 1,
