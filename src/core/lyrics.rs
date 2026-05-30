@@ -102,7 +102,6 @@ pub async fn fetch_lyrics(
             _ => fetch_lyrics_163(title, "").await,
         };
     }
-    }
 
     // 3. Online sources
     let result = match source {
