@@ -156,9 +156,11 @@ fn truncate_text(fm: &FontManager, text: &str, size: f32, max_w: f32) -> String 
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_row_hover(
     canvas: &Canvas,
     y: f32,
+    row_h: f32,
     content_w: f32,
     row_idx: usize,
     in_group: bool,
@@ -174,14 +176,14 @@ fn draw_row_hover(
         hp.set_color(Color::from_argb(alpha, base.r(), base.g(), base.b()));
         if in_group {
             canvas.draw_round_rect(
-                Rect::from_xywh(CONTENT_PADDING + 2.0, y, content_w - 4.0, ROW_HEIGHT),
+                Rect::from_xywh(CONTENT_PADDING + 2.0, y, content_w - 4.0, row_h),
                 4.0,
                 4.0,
                 &hp,
             );
         } else {
             canvas.draw_round_rect(
-                Rect::from_xywh(CONTENT_PADDING, y, content_w, ROW_HEIGHT),
+                Rect::from_xywh(CONTENT_PADDING, y, content_w, row_h),
                 GROUP_RADIUS,
                 GROUP_RADIUS,
                 &hp,
@@ -287,7 +289,16 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                 enabled,
             } => {
                 if y + ROW_HEIGHT >= visible_min_y && y <= visible_max_y {
-                    draw_row_hover(canvas, y, content_w, row_idx, in_group, hover_anims, theme);
+                    draw_row_hover(
+                        canvas,
+                        y,
+                        ROW_HEIGHT,
+                        content_w,
+                        row_idx,
+                        in_group,
+                        hover_anims,
+                        theme,
+                    );
                 }
                 let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
                 let cy = y + ROW_HEIGHT / 2.0;
@@ -365,7 +376,16 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                 enabled,
             } => {
                 if y + ROW_HEIGHT >= visible_min_y && y <= visible_max_y {
-                    draw_row_hover(canvas, y, content_w, row_idx, in_group, hover_anims, theme);
+                    draw_row_hover(
+                        canvas,
+                        y,
+                        ROW_HEIGHT,
+                        content_w,
+                        row_idx,
+                        in_group,
+                        hover_anims,
+                        theme,
+                    );
                 }
                 let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
                 let cy = y + ROW_HEIGHT / 2.0;
@@ -431,7 +451,16 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
             } => {
                 let visible = y + ROW_HEIGHT >= visible_min_y && y <= visible_max_y;
                 if visible {
-                    draw_row_hover(canvas, y, content_w, row_idx, in_group, hover_anims, theme);
+                    draw_row_hover(
+                        canvas,
+                        y,
+                        ROW_HEIGHT,
+                        content_w,
+                        row_idx,
+                        in_group,
+                        hover_anims,
+                        theme,
+                    );
                 }
                 let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
                 let cy = y + ROW_HEIGHT / 2.0;
@@ -502,18 +531,32 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                 btn_label,
                 clear_label,
                 current_path,
+                enabled,
             } => {
                 let has_path = current_path.as_ref().is_some_and(|p| !p.is_empty());
                 let row_h = if has_path { 64.0 } else { ROW_HEIGHT };
                 let visible = y + row_h >= visible_min_y && y <= visible_max_y;
                 if visible {
-                    draw_row_hover(canvas, y, content_w, row_idx, in_group, hover_anims, theme);
+                    draw_row_hover(
+                        canvas,
+                        y,
+                        row_h,
+                        content_w,
+                        row_idx,
+                        in_group,
+                        hover_anims,
+                        theme,
+                    );
                 }
                 let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
                 let cy = y + row_h / 2.0;
 
                 if visible {
-                    paint.set_color(theme.text_pri);
+                    paint.set_color(if *enabled {
+                        theme.text_pri
+                    } else {
+                        theme.text_sec
+                    });
                     fm.draw_text_cached(DrawTextCachedParams {
                         canvas,
                         text: label,
@@ -542,6 +585,17 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                         });
                     }
 
+                    let label_color = if *enabled {
+                        theme.text_pri
+                    } else {
+                        theme.text_sec
+                    };
+                    let bg_color = if *enabled {
+                        theme.card_highlight
+                    } else {
+                        theme.disabled
+                    };
+
                     let sel_w: f32 = 60.0;
                     let sel_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - sel_w;
                     draw_pill_btn(PillBtnParams {
@@ -551,8 +605,8 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                         w: sel_w,
                         h: 26.0,
                         label: btn_label,
-                        text_color: theme.text_pri,
-                        bg_color: theme.card_highlight,
+                        text_color: label_color,
+                        bg_color,
                     });
 
                     if let Some(cl) = clear_label {
@@ -565,8 +619,12 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                             w: clr_w,
                             h: 26.0,
                             label: cl,
-                            text_color: theme.danger,
-                            bg_color: theme.card_highlight,
+                            text_color: if *enabled {
+                                theme.danger
+                            } else {
+                                theme.text_sec
+                            },
+                            bg_color,
                         });
                     }
                 }
@@ -595,7 +653,16 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
             } => {
                 let visible = y + ROW_HEIGHT >= visible_min_y && y <= visible_max_y;
                 if visible {
-                    draw_row_hover(canvas, y, content_w, row_idx, in_group, hover_anims, theme);
+                    draw_row_hover(
+                        canvas,
+                        y,
+                        ROW_HEIGHT,
+                        content_w,
+                        row_idx,
+                        in_group,
+                        hover_anims,
+                        theme,
+                    );
                 }
                 let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
                 let cy = y + ROW_HEIGHT / 2.0;
@@ -708,7 +775,16 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
             } => {
                 let visible = y + ROW_HEIGHT >= visible_min_y && y <= visible_max_y;
                 if visible {
-                    draw_row_hover(canvas, y, content_w, row_idx, in_group, hover_anims, theme);
+                    draw_row_hover(
+                        canvas,
+                        y,
+                        ROW_HEIGHT,
+                        content_w,
+                        row_idx,
+                        in_group,
+                        hover_anims,
+                        theme,
+                    );
                 }
                 let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
                 let cy = y + ROW_HEIGHT / 2.0;
@@ -800,7 +876,16 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
             SettingsItem::RowLabel { label } => {
                 let visible = y + ROW_HEIGHT >= visible_min_y && y <= visible_max_y;
                 if visible {
-                    draw_row_hover(canvas, y, content_w, row_idx, in_group, hover_anims, theme);
+                    draw_row_hover(
+                        canvas,
+                        y,
+                        ROW_HEIGHT,
+                        content_w,
+                        row_idx,
+                        in_group,
+                        hover_anims,
+                        theme,
+                    );
                 }
                 let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
                 let cy = y + ROW_HEIGHT / 2.0;

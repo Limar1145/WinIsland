@@ -65,8 +65,9 @@ pub fn hit_test(items: &[SettingsItem], mx: f32, my: f32, start_y: f32, width: f
             SettingsItem::RowFolderPicker {
                 clear_label,
                 current_path,
+                enabled,
                 ..
-            } => {
+            } if *enabled => {
                 let has_path = current_path.as_ref().is_some_and(|p| !p.is_empty());
                 let row_h = if has_path { 64.0 } else { ROW_HEIGHT };
                 let cy = y + row_h / 2.0;

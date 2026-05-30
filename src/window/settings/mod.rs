@@ -603,6 +603,7 @@ impl SettingsApp {
                     .as_ref()
                     .map(|_| tr("folder_clear")),
                 current_path: self.config.lyrics_local_dir.clone(),
+                enabled: show_lyrics,
             },
             SettingsItem::GroupEnd,
             SettingsItem::SectionHeader {

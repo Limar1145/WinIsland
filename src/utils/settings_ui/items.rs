@@ -53,6 +53,7 @@ pub enum SettingsItem {
         btn_label: String,
         clear_label: Option<String>,
         current_path: Option<String>,
+        enabled: bool,
     },
     RowSourceSelect {
         label: String,
