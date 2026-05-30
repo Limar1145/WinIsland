@@ -6,6 +6,9 @@ use std::cell::RefCell;
 use std::time::Instant;
 use windows::Win32::Graphics::Gdi::*;
 
+// Reduced brightness multipliers to compensate for self-capture feedback
+// (without WDA_EXCLUDEFROMCAPTURE the captured desktop includes the island's
+// own bright content, so we dial back the shader's built-in brightening).
 const SKSL_SOURCE: &str = r#"
 uniform shader uBackground;
 uniform float4 uShape;
@@ -37,15 +40,15 @@ half4 main(float2 coord) {
     float2 sourceCoord = sourceUV * uShape.zw + uShape.xy;
 
     float blurAmt = 6.0;
-    half4 color = uBackground.eval(sourceCoord) * 0.4;
-    color += uBackground.eval(sourceCoord + float2(blurAmt, 0)) * 0.15;
-    color += uBackground.eval(sourceCoord - float2(blurAmt, 0)) * 0.15;
-    color += uBackground.eval(sourceCoord + float2(0, blurAmt)) * 0.15;
-    color += uBackground.eval(sourceCoord - float2(0, blurAmt)) * 0.15;
+    half4 color = uBackground.eval(sourceCoord) * 0.35;
+    color += uBackground.eval(sourceCoord + float2(blurAmt, 0)) * 0.13;
+    color += uBackground.eval(sourceCoord - float2(blurAmt, 0)) * 0.13;
+    color += uBackground.eval(sourceCoord + float2(0, blurAmt)) * 0.13;
+    color += uBackground.eval(sourceCoord - float2(0, blurAmt)) * 0.13;
 
     float gray = dot(color.rgb, half3(0.299, 0.587, 0.114));
-    color.rgb = mix(float3(gray), color.rgb, 1.1);
-    color.rgb *= 1.05;
+    color.rgb = mix(float3(gray), color.rgb, 1.0);
+    color.rgb *= 0.95;
 
     float edgeBright = smoothstep(0.0, -0.3, normDist) * 0.08;
     color.rgb += edgeBright;
@@ -53,7 +56,7 @@ half4 main(float2 coord) {
     float specY = smoothstep(0.15, 0.0, uv.y) * smoothstep(-0.02, 0.08, uv.y);
     float specX = smoothstep(0.1, 0.3, uv.x) * smoothstep(0.9, 0.7, uv.x);
     float specular = specY * specX * smoothstep(0.0, -0.2, normDist);
-    color.rgb += specular * 0.15;
+    color.rgb += specular * 0.06;
 
     color.rgb += smoothstep(0.3, 0.0, uv.y) * 0.03;
 
@@ -65,8 +68,13 @@ half4 main(float2 coord) {
 
 type CacheEntry = (Image, Instant, i32, i32, u32, u32);
 
+// Captured + blurred desktop background, keyed by screen position only.
+// Refreshed when position changes or every 5s (heavily blurred = stale content invisible).
+type BgCacheEntry = (Image, i32, i32, Instant);
+
 thread_local! {
     static GLASS_CACHE: RefCell<Option<CacheEntry>> = const { RefCell::new(None) };
+    static BG_CACHE: RefCell<Option<BgCacheEntry>> = const { RefCell::new(None) };
     static EFFECT_CACHE: RefCell<Option<skia_safe::RuntimeEffect>> = const { RefCell::new(None) };
 }
 
@@ -97,6 +105,7 @@ pub fn get_liquid_glass_background(
         return None;
     }
 
+    // Fast path: final output already cached (exact params, <200ms)
     let cached = GLASS_CACHE.with(|cell| {
         let cache = cell.borrow();
         if let Some((img, time, cx, cy, cw, ch)) = cache.as_ref()
@@ -114,7 +123,11 @@ pub fn get_liquid_glass_background(
         return Some(img);
     }
 
-    let result = render_liquid_glass(screen_x, screen_y, w, h, corner_radius);
+    // Get or refresh the blurred background capture (keyed by screen position only)
+    let blurred = get_or_capture_background(screen_x, screen_y, w, h)?;
+
+    // Run shader + borders using the (potentially cached) background
+    let result = render_liquid_glass(screen_x, screen_y, w, h, corner_radius, &blurred);
 
     if let Some(ref img) = result {
         GLASS_CACHE.with(|cell| {
@@ -125,24 +138,34 @@ pub fn get_liquid_glass_background(
     result
 }
 
-pub fn clear_liquid_glass_cache() {
-    GLASS_CACHE.with(|cell| {
-        *cell.borrow_mut() = None;
+fn get_or_capture_background(screen_x: i32, screen_y: i32, w: u32, h: u32) -> Option<Image> {
+    // Check BG_CACHE: same position and less than 5s old
+    let cached = BG_CACHE.with(|cell| {
+        let cache = cell.borrow();
+        if let Some((img, cx, cy, time)) = cache.as_ref()
+            && *cx == screen_x
+            && *cy == screen_y
+            && time.elapsed().as_millis() < 5000
+        {
+            return Some(img.clone());
+        }
+        None
     });
+    if let Some(img) = cached {
+        return Some(img);
+    }
+
+    // Capture + blur the desktop region
+    let blurred = capture_and_blur(screen_x, screen_y, w, h)?;
+
+    BG_CACHE.with(|cell| {
+        *cell.borrow_mut() = Some((blurred.clone(), screen_x, screen_y, Instant::now()));
+    });
+
+    Some(blurred)
 }
 
-fn render_liquid_glass(
-    screen_x: i32,
-    screen_y: i32,
-    w: u32,
-    h: u32,
-    corner_radius: f32,
-) -> Option<Image> {
-    // The SKSL shader does per-pixel refraction and specular, so it must run
-    // at full resolution for correct visual quality (downscaling would smear
-    // the 6px blur offsets and pixelate specular highlights).
-    //
-    // We reduce cost by keeping a tight capture margin and moderate blur sigma.
+fn capture_and_blur(screen_x: i32, screen_y: i32, w: u32, h: u32) -> Option<Image> {
     let blur_sigma = 12.0f32;
     let margin = (blur_sigma * 3.0).max(20.0) as i32;
 
@@ -152,15 +175,7 @@ fn render_liquid_glass(
     let cap_h = h as i32 + 2 * margin;
 
     // SAFETY: GDI screen capture for liquid glass backdrop. All Win32 API
-    // calls operate on valid handles obtained within this block. Resources
-    // are released in reverse order: SelectObject restore, DeleteObject,
-    // DeleteDC, ReleaseDC. GetDC with default HWND retrieves the desktop DC.
-    //
-    // Note: WDA_EXCLUDEFROMCAPTURE is intentionally NOT used here — the
-    // toggle caused a one-frame delay on window transitions (screenshot tools
-    // couldn't capture the island). Liquid glass's refractive effect may
-    // capture the island window itself, but the visual impact is negligible
-    // in practice and the seamless transition experience is preferred.
+    // calls operate on valid handles obtained within this block.
     unsafe {
         let hdc_screen = GetDC(windows::Win32::Foundation::HWND::default());
         if hdc_screen.is_invalid() {
@@ -222,7 +237,6 @@ fn render_liquid_glass(
         let data = Data::new_copy(&pixels);
         let src_img = images::raster_from_data(&info, data, (cap_w * 4) as usize)?;
 
-        // Moderate blur to soften background before shader sampling
         let mut blur_surface = surfaces::raster_n32_premul(ISize::new(cap_w, cap_h))?;
         let blur_canvas = blur_surface.canvas();
         let mut blur_paint = Paint::default();
@@ -230,90 +244,116 @@ fn render_liquid_glass(
             blur_paint.set_image_filter(filter);
         }
         blur_canvas.draw_image(&src_img, (0, 0), Some(&blur_paint));
-        let blurred = blur_surface.image_snapshot();
 
-        let effect = get_or_init_effect()?;
-
-        let shape_x = (screen_x - cap_x) as f32;
-        let shape_y = (screen_y - cap_y) as f32;
-        let shape_w = w as f32;
-        let shape_h = h as f32;
-
-        let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::None);
-        let bg_shader = blurred.to_shader((TileMode::Clamp, TileMode::Clamp), sampling, None)?;
-
-        let uniform_size = effect.uniform_size();
-        let mut uniform_data = vec![0u8; uniform_size];
-        let write_f32 = |data: &mut [u8], offset: usize, val: f32| {
-            data[offset..offset + 4].copy_from_slice(&val.to_le_bytes());
-        };
-        for u in effect.uniforms() {
-            match u.name() {
-                "uShape" => {
-                    let off = u.offset();
-                    write_f32(&mut uniform_data, off, shape_x);
-                    write_f32(&mut uniform_data, off + 4, shape_y);
-                    write_f32(&mut uniform_data, off + 8, shape_w);
-                    write_f32(&mut uniform_data, off + 12, shape_h);
-                }
-                "uRadius" => {
-                    write_f32(&mut uniform_data, u.offset(), corner_radius);
-                }
-                _ => {}
-            }
-        }
-
-        let uniform_data_obj = skia_safe::Data::new_copy(&uniform_data);
-        let children = [skia_safe::runtime_effect::ChildPtr::from(bg_shader)];
-        let liquid_shader = effect.make_shader(uniform_data_obj, &children, None)?;
-
-        let crop_x = (screen_x - cap_x) as f32;
-        let crop_y = (screen_y - cap_y) as f32;
-
-        let mut final_surface = surfaces::raster_n32_premul(ISize::new(w as i32, h as i32))?;
-        let final_canvas = final_surface.canvas();
-
-        let mut paint = Paint::default();
-        paint.set_anti_alias(true);
-        paint.set_shader(liquid_shader);
-
-        final_canvas.translate((-crop_x, -crop_y));
-        final_canvas.draw_rect(
-            Rect::from_xywh(0.0, 0.0, cap_w as f32, cap_h as f32),
-            &paint,
-        );
-
-        let final_img = final_surface.image_snapshot();
-
-        let mut border_surface = surfaces::raster_n32_premul(ISize::new(w as i32, h as i32))?;
-        let border_canvas = border_surface.canvas();
-        border_canvas.draw_image(&final_img, (0, 0), None);
-
-        let mut outer_border = Paint::default();
-        outer_border.set_anti_alias(true);
-        outer_border.set_color(Color::from_argb(110, 255, 255, 255));
-        outer_border.set_style(skia_safe::PaintStyle::Stroke);
-        outer_border.set_stroke_width(1.0);
-        let outer_rrect = RRect::new_rect_xy(
-            Rect::from_xywh(0.5, 0.5, w as f32 - 1.0, h as f32 - 1.0),
-            corner_radius,
-            corner_radius,
-        );
-        border_canvas.draw_rrect(outer_rrect, &outer_border);
-
-        let inset = 1.0f32;
-        let inner_rrect = RRect::new_rect_xy(
-            Rect::from_xywh(inset, inset, w as f32 - inset * 2.0, h as f32 - inset * 2.0),
-            (corner_radius - inset).max(0.0),
-            (corner_radius - inset).max(0.0),
-        );
-        let mut inner_border = Paint::default();
-        inner_border.set_anti_alias(true);
-        inner_border.set_color(Color::from_argb(55, 255, 255, 255));
-        inner_border.set_style(skia_safe::PaintStyle::Stroke);
-        inner_border.set_stroke_width(0.5);
-        border_canvas.draw_rrect(inner_rrect, &inner_border);
-
-        Some(border_surface.image_snapshot())
+        Some(blur_surface.image_snapshot())
     }
+}
+
+fn render_liquid_glass(
+    screen_x: i32,
+    screen_y: i32,
+    w: u32,
+    h: u32,
+    corner_radius: f32,
+    blurred: &Image,
+) -> Option<Image> {
+    let margin = (12.0_f32 * 3.0_f32).max(20.0) as i32;
+    let cap_x = (screen_x - margin).max(0);
+    let cap_y = (screen_y - margin).max(0);
+    let cap_w = w as i32 + 2 * margin;
+    let cap_h = h as i32 + 2 * margin;
+
+    let effect = get_or_init_effect()?;
+
+    let shape_x = (screen_x - cap_x) as f32;
+    let shape_y = (screen_y - cap_y) as f32;
+    let shape_w = w as f32;
+    let shape_h = h as f32;
+
+    let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::None);
+    let bg_shader = blurred.to_shader((TileMode::Clamp, TileMode::Clamp), sampling, None)?;
+
+    let uniform_size = effect.uniform_size();
+    let mut uniform_data = vec![0u8; uniform_size];
+    let write_f32 = |data: &mut [u8], offset: usize, val: f32| {
+        data[offset..offset + 4].copy_from_slice(&val.to_le_bytes());
+    };
+    for u in effect.uniforms() {
+        match u.name() {
+            "uShape" => {
+                let off = u.offset();
+                write_f32(&mut uniform_data, off, shape_x);
+                write_f32(&mut uniform_data, off + 4, shape_y);
+                write_f32(&mut uniform_data, off + 8, shape_w);
+                write_f32(&mut uniform_data, off + 12, shape_h);
+            }
+            "uRadius" => {
+                write_f32(&mut uniform_data, u.offset(), corner_radius);
+            }
+            _ => {}
+        }
+    }
+
+    let uniform_data_obj = skia_safe::Data::new_copy(&uniform_data);
+    let children = [skia_safe::runtime_effect::ChildPtr::from(bg_shader)];
+    let liquid_shader = effect.make_shader(uniform_data_obj, &children, None)?;
+
+    let crop_x = (screen_x - cap_x) as f32;
+    let crop_y = (screen_y - cap_y) as f32;
+
+    let mut final_surface = surfaces::raster_n32_premul(ISize::new(w as i32, h as i32))?;
+    let final_canvas = final_surface.canvas();
+
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_shader(liquid_shader);
+
+    final_canvas.translate((-crop_x, -crop_y));
+    final_canvas.draw_rect(
+        Rect::from_xywh(0.0, 0.0, cap_w as f32, cap_h as f32),
+        &paint,
+    );
+
+    let final_img = final_surface.image_snapshot();
+
+    // Draw borders
+    let mut border_surface = surfaces::raster_n32_premul(ISize::new(w as i32, h as i32))?;
+    let border_canvas = border_surface.canvas();
+    border_canvas.draw_image(&final_img, (0, 0), None);
+
+    let mut outer_border = Paint::default();
+    outer_border.set_anti_alias(true);
+    outer_border.set_color(Color::from_argb(90, 255, 255, 255));
+    outer_border.set_style(skia_safe::PaintStyle::Stroke);
+    outer_border.set_stroke_width(1.0);
+    let outer_rrect = RRect::new_rect_xy(
+        Rect::from_xywh(0.5, 0.5, w as f32 - 1.0, h as f32 - 1.0),
+        corner_radius,
+        corner_radius,
+    );
+    border_canvas.draw_rrect(outer_rrect, &outer_border);
+
+    let inset = 1.0f32;
+    let inner_rrect = RRect::new_rect_xy(
+        Rect::from_xywh(inset, inset, w as f32 - inset * 2.0, h as f32 - inset * 2.0),
+        (corner_radius - inset).max(0.0),
+        (corner_radius - inset).max(0.0),
+    );
+    let mut inner_border = Paint::default();
+    inner_border.set_anti_alias(true);
+    inner_border.set_color(Color::from_argb(40, 255, 255, 255));
+    inner_border.set_style(skia_safe::PaintStyle::Stroke);
+    inner_border.set_stroke_width(0.5);
+    border_canvas.draw_rrect(inner_rrect, &inner_border);
+
+    Some(border_surface.image_snapshot())
+}
+
+pub fn clear_liquid_glass_cache() {
+    GLASS_CACHE.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+    BG_CACHE.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
 }
