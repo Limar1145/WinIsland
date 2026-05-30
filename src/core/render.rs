@@ -9,7 +9,7 @@ use crate::ui::expanded::widget_view::draw_widget_page;
 use crate::utils::backdrop::{get_dynamic_bg_color, get_last_valid_color, get_mica_background};
 use crate::utils::font::{DrawTextCachedParams, FontManager};
 use crate::utils::glass::get_glass_background;
-use crate::utils::liquid_glass::{get_liquid_glass_background, should_use_dark_text};
+use crate::utils::liquid_glass::get_liquid_glass_background;
 use skia_safe::canvas::SrcRectConstraint;
 use skia_safe::{
     ClipOp, Color, FilterMode, ISize, MipmapMode, Paint, RRect, Rect, SamplingOptions,
@@ -191,14 +191,36 @@ pub fn draw_island(
 
     let mut bg_color = Color::BLACK;
 
-    let use_dark_text = island_style == "liquid_glass" && should_use_dark_text();
-    let text_color = if use_dark_text {
-        Color::from_argb(255, 20, 20, 20)
+    // Liquid glass text uses a tint derived from the music palette — keeps it
+    // readable on the dark refractive background while feeling cohesive.
+    let liquid_palette = if island_style == "liquid_glass" {
+        let p = get_media_palette(media);
+        if p.is_empty() || (p[0].r() >= 250 && p[0].g() >= 250 && p[0].b() >= 250) {
+            vec![Color::from_rgb(200, 200, 200)]
+        } else {
+            p
+        }
+    } else {
+        vec![Color::from_rgb(200, 200, 200)]
+    };
+
+    let text_color = if island_style == "liquid_glass" {
+        let c = &liquid_palette[0];
+        Color::from_rgb(
+            (c.r() as f32 * 0.25 + 255.0 * 0.75) as u8,
+            (c.g() as f32 * 0.25 + 255.0 * 0.75) as u8,
+            (c.b() as f32 * 0.25 + 255.0 * 0.75) as u8,
+        )
     } else {
         Color::WHITE
     };
-    let text_color_sec = if use_dark_text {
-        Color::from_argb(255, 60, 60, 60)
+    let text_color_sec = if island_style == "liquid_glass" {
+        let c = &liquid_palette[0];
+        Color::from_rgb(
+            (c.r() as f32 * 0.15 + 255.0 * 0.85) as u8,
+            (c.g() as f32 * 0.15 + 255.0 * 0.85) as u8,
+            (c.b() as f32 * 0.15 + 255.0 * 0.85) as u8,
+        )
     } else {
         Color::WHITE
     };
@@ -320,6 +342,17 @@ pub fn draw_island(
     let expanded_alpha_f = (expansion_progress.powf(2.0)).clamp(0.0, 1.0) * (1.0 - hide_progress);
     let mini_alpha_f = (1.0 - expansion_progress * 1.5).clamp(0.0, 1.0) * (1.0 - hide_progress);
 
+    let palette = if island_style == "liquid_glass" {
+        liquid_palette.clone()
+    } else if expanded_alpha_f > 0.01 || mini_alpha_f > 0.01 {
+        get_media_palette(media)
+    } else {
+        vec![
+            Color::from_rgb(180, 180, 180),
+            Color::from_rgb(100, 100, 100),
+        ]
+    };
+
     let viz_h_scale = 0.45 + (1.0 - 0.45) * expansion_progress;
 
     let mut widget_animating = false;
@@ -356,6 +389,7 @@ pub fn draw_island(
             dt,
             text_color,
             text_color_sec,
+            palette: palette.clone(),
         });
         canvas.restore();
 
@@ -473,7 +507,7 @@ pub fn draw_island(
                 widget_animating = true;
             }
         }
-        let palette = get_media_palette(media);
+        let palette = &palette;
         let viz_x = offset_x + current_w - 17.0 * global_scale;
         let viz_y = offset_y + current_h / 2.0;
         draw_visualizer(DrawVisualizerParams {
@@ -482,7 +516,7 @@ pub fn draw_island(
             y: viz_y,
             alpha,
             is_playing: media.is_playing,
-            palette: &palette,
+            palette,
             spectrum: &media.spectrum,
             w_scale: 0.55 * global_scale,
             h_scale: viz_h_scale * global_scale,

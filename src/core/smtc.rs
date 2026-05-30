@@ -250,6 +250,7 @@ fn smtc_poll_loop(
             &current_lyrics_source,
             current_lyrics_fallback,
             &mut current_allowed_apps,
+            true,
         );
         let info = info_tx.borrow();
         let timeline_ready = info.duration_ms > 0
@@ -268,6 +269,8 @@ fn smtc_poll_loop(
 
     let mut last_manager_refresh = Instant::now();
     let mut current_manager = manager;
+    let mut last_regular_update = Instant::now();
+    let mut regular_poll_count = 0u32;
 
     while !cancel.is_cancelled() {
         // Refresh manager every 30 seconds
@@ -361,7 +364,7 @@ fn smtc_poll_loop(
             }
         }
 
-        // Check COM events
+        // Check COM events — when triggered, immediately update and reset the regular timer
         if event_rx.try_recv().is_ok() {
             update_media_info(
                 &current_manager,
@@ -369,17 +372,28 @@ fn smtc_poll_loop(
                 &current_lyrics_source,
                 current_lyrics_fallback,
                 &mut current_allowed_apps,
+                true,
             );
+            last_regular_update = Instant::now();
         }
 
-        // Regular update
-        update_media_info(
-            &current_manager,
-            &info_tx,
-            &current_lyrics_source,
-            current_lyrics_fallback,
-            &mut current_allowed_apps,
-        );
+        // Regular update — only if last update was > 300ms ago
+        if last_regular_update.elapsed() > Duration::from_millis(300) {
+            // Periodically run auto_allow as a safety net: every 10th poll (~3s)
+            // in case COM session-change events were missed (e.g. handler lost
+            // during manager refresh).
+            regular_poll_count += 1;
+            let do_auto_allow = regular_poll_count.is_multiple_of(10);
+            update_media_info(
+                &current_manager,
+                &info_tx,
+                &current_lyrics_source,
+                current_lyrics_fallback,
+                &mut current_allowed_apps,
+                do_auto_allow,
+            );
+            last_regular_update = Instant::now();
+        }
 
         std::thread::sleep(Duration::from_millis(300));
     }
@@ -391,8 +405,11 @@ fn update_media_info(
     lyrics_source: &str,
     lyrics_fallback: bool,
     allowed_apps: &mut Vec<String>,
+    auto_allow: bool,
 ) {
-    *allowed_apps = auto_allow_new_apps(manager, allowed_apps);
+    if auto_allow {
+        *allowed_apps = auto_allow_new_apps(manager, allowed_apps);
+    }
 
     if let Some(session) = get_target_session(manager, allowed_apps) {
         let _ = fetch_properties(&session, info_tx, lyrics_source, lyrics_fallback);

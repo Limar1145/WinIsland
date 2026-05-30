@@ -261,6 +261,7 @@ pub struct DrawMusicPageParams<'a> {
     pub dt: f32,
     pub text_color: Color,
     pub text_color_sec: Color,
+    pub palette: Vec<Color>,
 }
 
 pub struct DrawVisualizerParams<'a> {
@@ -297,6 +298,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
         dt,
         text_color,
         text_color_sec,
+        palette,
     } = params;
 
     let arrow_alpha = (alpha as f32 * (1.0 - view_offset * 5.0).clamp(0.0, 1.0)) as u8;
@@ -319,20 +321,10 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
     } else {
         (base_img_size, ox + 28.0 * scale, oy + 24.0 * scale)
     };
-    let (image_to_draw, cache_key) = if music_active {
-        get_cached_media_image_with_key(media)
-            .map(|(img, key)| (Some(img), key))
-            .unwrap_or((None, "none".to_string()))
+    let image_to_draw = if music_active {
+        get_cached_media_image(media)
     } else {
-        (None, "none".to_string())
-    };
-    let palette = if let Some(ref img) = image_to_draw {
-        get_palette_from_image(img, &cache_key)
-    } else {
-        vec![
-            Color::from_rgb(180, 180, 180),
-            Color::from_rgb(100, 100, 100),
-        ]
+        None
     };
 
     let pause_s = PAUSE_SPRING.with(|cell| cell.borrow().value);
@@ -781,32 +773,6 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
                 s.value += s.velocity;
             }
             (s.value, (s.velocity.abs() * 40.0 * scale).clamp(0.0, 15.0))
-        });
-
-        let mut effective_is_playing = media.is_playing;
-        LOCAL_PLAY_STATE.with(|cell| {
-            let mut opt = cell.borrow_mut();
-            if let Some((opt_val, time)) = *opt {
-                if media.is_playing == opt_val || time.elapsed().as_millis() > 2000 {
-                    *opt = None;
-                } else {
-                    effective_is_playing = opt_val;
-                }
-            }
-        });
-
-        let pause_t = PAUSE_ANIM.with(|cell| {
-            let mut v = cell.borrow_mut();
-            let target = if effective_is_playing { 1.0_f32 } else { 0.0 };
-            if pause_s < 0.15 {
-                *v = target;
-            } else {
-                *v += (target - *v) * 0.12;
-                if (*v - target).abs() < 0.005 {
-                    *v = target;
-                }
-            }
-            *v
         });
 
         canvas.save();
