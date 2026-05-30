@@ -503,12 +503,14 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                 clear_label,
                 current_path,
             } => {
-                let visible = y + ROW_HEIGHT >= visible_min_y && y <= visible_max_y;
+                let has_path = current_path.as_ref().is_some_and(|p| !p.is_empty());
+                let row_h = if has_path { 64.0 } else { ROW_HEIGHT };
+                let visible = y + row_h >= visible_min_y && y <= visible_max_y;
                 if visible {
                     draw_row_hover(canvas, y, content_w, row_idx, in_group, hover_anims, theme);
                 }
                 let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
-                let cy = y + ROW_HEIGHT / 2.0;
+                let cy = y + row_h / 2.0;
 
                 if visible {
                     paint.set_color(theme.text_pri);
@@ -533,7 +535,7 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                             canvas,
                             text: &display,
                             x: row_x,
-                            y: cy + 22.0,
+                            y: cy + 17.0,
                             size: 11.0,
                             bold: false,
                             paint: &paint,
@@ -578,11 +580,8 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                         sep.set_stroke_width(0.5);
                         sep.set_style(skia_safe::paint::Style::Stroke);
                         canvas.draw_line(
-                            (row_x, y + ROW_HEIGHT),
-                            (
-                                CONTENT_PADDING + content_w - GROUP_INNER_PAD,
-                                y + ROW_HEIGHT,
-                            ),
+                            (row_x, y + row_h),
+                            (CONTENT_PADDING + content_w - GROUP_INNER_PAD, y + row_h),
                             &sep,
                         );
                     }

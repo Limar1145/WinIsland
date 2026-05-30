@@ -566,8 +566,7 @@ impl SettingsApp {
                     && label == &tr("lyrics_local_dir")
                     && let Some(path) = rfd::FileDialog::new().pick_folder()
                 {
-                    self.config.lyrics_local_dir =
-                        Some(path.to_string_lossy().into_owned());
+                    self.config.lyrics_local_dir = Some(path.to_string_lossy().into_owned());
                     changed = true;
                 }
             }
