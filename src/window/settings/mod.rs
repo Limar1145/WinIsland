@@ -594,6 +594,16 @@ impl SettingsApp {
                 value: format!("{}", self.config.lyrics_scroll_max_width as i32),
                 enabled: show_lyrics && self.config.lyrics_scroll,
             },
+            SettingsItem::RowFolderPicker {
+                label: tr("lyrics_local_dir"),
+                btn_label: tr("folder_select"),
+                clear_label: self
+                    .config
+                    .lyrics_local_dir
+                    .as_ref()
+                    .map(|_| tr("folder_clear")),
+                current_path: self.config.lyrics_local_dir.clone(),
+            },
             SettingsItem::GroupEnd,
             SettingsItem::SectionHeader {
                 label: tr("media_apps"),

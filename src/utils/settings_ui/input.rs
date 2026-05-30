@@ -11,6 +11,8 @@ pub enum ClickResult {
     CenterLink(usize),
     SourceButton(usize),
     AppItem(usize),
+    FolderSelect(usize),
+    FolderClear(usize),
 }
 
 fn in_rect(mx: f32, my: f32, x: f32, y: f32, w: f32, h: f32) -> bool {
@@ -57,6 +59,21 @@ pub fn hit_test(items: &[SettingsItem], mx: f32, my: f32, start_y: f32, width: f
                     let rst_x = sel_x - rst_w - 6.0;
                     if in_rect(mx, my, rst_x, cy - 13.0, rst_w, 26.0) {
                         return ClickResult::FontReset(idx);
+                    }
+                }
+            }
+            SettingsItem::RowFolderPicker { clear_label, .. } => {
+                let cy = y + ROW_HEIGHT / 2.0;
+                let sel_w: f32 = 60.0;
+                let sel_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - sel_w;
+                if in_rect(mx, my, sel_x, cy - 13.0, sel_w, 26.0) {
+                    return ClickResult::FolderSelect(idx);
+                }
+                if clear_label.is_some() {
+                    let clr_w: f32 = 60.0;
+                    let clr_x = sel_x - clr_w - 6.0;
+                    if in_rect(mx, my, clr_x, cy - 13.0, clr_w, 26.0) {
+                        return ClickResult::FolderClear(idx);
                     }
                 }
             }

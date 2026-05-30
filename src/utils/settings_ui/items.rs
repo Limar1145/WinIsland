@@ -48,6 +48,12 @@ pub enum SettingsItem {
         btn_label: String,
         reset_label: Option<String>,
     },
+    RowFolderPicker {
+        label: String,
+        btn_label: String,
+        clear_label: Option<String>,
+        current_path: Option<String>,
+    },
     RowSourceSelect {
         label: String,
         options: Vec<(String, bool)>,
@@ -98,6 +104,7 @@ impl SettingsItem {
             SettingsItem::RowStepper { .. }
                 | SettingsItem::RowSwitch { .. }
                 | SettingsItem::RowFontPicker { .. }
+                | SettingsItem::RowFolderPicker { .. }
                 | SettingsItem::RowSourceSelect { .. }
                 | SettingsItem::RowAppItem { .. }
                 | SettingsItem::RowLabel { .. }

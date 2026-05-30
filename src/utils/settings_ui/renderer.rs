@@ -497,6 +497,98 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                 }
                 row_idx += 1;
             }
+            SettingsItem::RowFolderPicker {
+                label,
+                btn_label,
+                clear_label,
+                current_path,
+            } => {
+                let visible = y + ROW_HEIGHT >= visible_min_y && y <= visible_max_y;
+                if visible {
+                    draw_row_hover(canvas, y, content_w, row_idx, in_group, hover_anims, theme);
+                }
+                let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
+                let cy = y + ROW_HEIGHT / 2.0;
+
+                if visible {
+                    paint.set_color(theme.text_pri);
+                    fm.draw_text_cached(DrawTextCachedParams {
+                        canvas,
+                        text: label,
+                        x: row_x,
+                        y: cy + 5.0,
+                        size: 13.0,
+                        bold: false,
+                        paint: &paint,
+                    });
+
+                    // Show current path as secondary text on the left
+                    if let Some(path) = current_path
+                        && !path.is_empty()
+                    {
+                        paint.set_color(theme.text_sec);
+                        let max_w = content_w - GROUP_INNER_PAD * 2.0 - 140.0;
+                        let display = truncate_text(fm, path, 11.0, max_w);
+                        fm.draw_text_cached(DrawTextCachedParams {
+                            canvas,
+                            text: &display,
+                            x: row_x,
+                            y: cy + 22.0,
+                            size: 11.0,
+                            bold: false,
+                            paint: &paint,
+                        });
+                    }
+
+                    let sel_w: f32 = 60.0;
+                    let sel_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - sel_w;
+                    draw_pill_btn(PillBtnParams {
+                        canvas,
+                        x: sel_x,
+                        y: cy - 13.0,
+                        w: sel_w,
+                        h: 26.0,
+                        label: btn_label,
+                        text_color: theme.text_pri,
+                        bg_color: theme.card_highlight,
+                    });
+
+                    if let Some(cl) = clear_label {
+                        let clr_w: f32 = 60.0;
+                        let clr_x = sel_x - clr_w - 6.0;
+                        draw_pill_btn(PillBtnParams {
+                            canvas,
+                            x: clr_x,
+                            y: cy - 13.0,
+                            w: clr_w,
+                            h: 26.0,
+                            label: cl,
+                            text_color: theme.danger,
+                            bg_color: theme.card_highlight,
+                        });
+                    }
+                }
+
+                if in_group {
+                    group_current_row += 1;
+                    if group_current_row < group_row_count && visible {
+                        let mut sep = Paint::default();
+                        sep.set_anti_alias(true);
+                        sep.set_color(theme.separator);
+                        sep.set_stroke_width(0.5);
+                        sep.set_style(skia_safe::paint::Style::Stroke);
+                        canvas.draw_line(
+                            (row_x, y + ROW_HEIGHT),
+                            (
+                                CONTENT_PADDING + content_w - GROUP_INNER_PAD,
+                                y + ROW_HEIGHT,
+                            ),
+                            &sep,
+                        );
+                    }
+                }
+                row_idx += 1;
+            }
             SettingsItem::RowSourceSelect {
                 label,
                 options,
