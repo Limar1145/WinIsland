@@ -138,15 +138,18 @@ fn render_liquid_glass(
     h: u32,
     corner_radius: f32,
 ) -> Option<Image> {
-    // PERFORMANCE: downscale 4x like glass.rs to reduce pixel count 16x.
-    // The SKSL shader does 5 texture lookups per pixel, so this dramatically
-    // reduces GPU work. The result is scaled back up at the end.
-    let downscale = 4u32;
-    let margin = ((w.max(h) / downscale) as i32).max(20);
-    let cap_full_w = (w as i32 + 2 * margin).max(1);
-    let cap_full_h = (h as i32 + 2 * margin).max(1);
-    let cap_w = (cap_full_w / downscale as i32).max(1);
-    let cap_h = (cap_full_h / downscale as i32).max(1);
+    // The SKSL shader does per-pixel refraction and specular, so it must run
+    // at full resolution for correct visual quality (downscaling would smear
+    // the 6px blur offsets and pixelate specular highlights).
+    //
+    // We reduce cost by keeping a tight capture margin and moderate blur sigma.
+    let blur_sigma = 12.0f32;
+    let margin = (blur_sigma * 3.0).max(20.0) as i32;
+
+    let cap_x = (screen_x - margin).max(0);
+    let cap_y = (screen_y - margin).max(0);
+    let cap_w = w as i32 + 2 * margin;
+    let cap_h = h as i32 + 2 * margin;
 
     // SAFETY: GDI screen capture for liquid glass backdrop. All Win32 API
     // calls operate on valid handles obtained within this block. Resources
@@ -171,19 +174,8 @@ fn render_liquid_glass(
         }
         let old = SelectObject(hdc_mem, hbm);
 
-        let _ = SetStretchBltMode(hdc_mem, STRETCH_BLT_MODE(HALFTONE.0));
-        let _ = StretchBlt(
-            hdc_mem,
-            0,
-            0,
-            cap_w,
-            cap_h,
-            hdc_screen,
-            screen_x - margin,
-            screen_y - margin,
-            cap_full_w,
-            cap_full_h,
-            SRCCOPY,
+        let _ = BitBlt(
+            hdc_mem, 0, 0, cap_w, cap_h, hdc_screen, cap_x, cap_y, SRCCOPY,
         );
 
         let mut bmi: BITMAPINFO = std::mem::zeroed();
@@ -224,8 +216,7 @@ fn render_liquid_glass(
         let data = Data::new_copy(&pixels);
         let src_img = images::raster_from_data(&info, data, (cap_w * 4) as usize)?;
 
-        // Blur at the downscaled resolution (cheap)
-        let blur_sigma = 20.0 / downscale as f32;
+        // Moderate blur to soften background before shader sampling
         let mut blur_surface = surfaces::raster_n32_premul(ISize::new(cap_w, cap_h))?;
         let blur_canvas = blur_surface.canvas();
         let mut blur_paint = Paint::default();
@@ -237,14 +228,10 @@ fn render_liquid_glass(
 
         let effect = get_or_init_effect()?;
 
-        // The effect is applied at downscaled coords but the shader expects
-        // full-res shape dimensions. Scale uniforms accordingly.
-        let ds = downscale as f32;
-        let scaled_margin = margin as f32;
-        let shape_x = scaled_margin;
-        let shape_y = scaled_margin;
-        let shape_w = w as f32 / ds;
-        let shape_h = h as f32 / ds;
+        let shape_x = (screen_x - cap_x) as f32;
+        let shape_y = (screen_y - cap_y) as f32;
+        let shape_w = w as f32;
+        let shape_h = h as f32;
 
         let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::None);
         let bg_shader = blurred.to_shader((TileMode::Clamp, TileMode::Clamp), sampling, None)?;
@@ -264,12 +251,7 @@ fn render_liquid_glass(
                     write_f32(&mut uniform_data, off + 12, shape_h);
                 }
                 "uRadius" => {
-                    let scaled = if corner_radius > 0.0 {
-                        (corner_radius / ds).max(1.0)
-                    } else {
-                        0.0
-                    };
-                    write_f32(&mut uniform_data, u.offset(), scaled);
+                    write_f32(&mut uniform_data, u.offset(), corner_radius);
                 }
                 _ => {}
             }
@@ -279,38 +261,28 @@ fn render_liquid_glass(
         let children = [skia_safe::runtime_effect::ChildPtr::from(bg_shader)];
         let liquid_shader = effect.make_shader(uniform_data_obj, &children, None)?;
 
-        // Render effect at downscaled size
-        let final_w = (w / downscale).max(1) as i32;
-        let final_h = (h / downscale).max(1) as i32;
+        let crop_x = (screen_x - cap_x) as f32;
+        let crop_y = (screen_y - cap_y) as f32;
 
-        let mut final_surface = surfaces::raster_n32_premul(ISize::new(final_w, final_h))?;
+        let mut final_surface = surfaces::raster_n32_premul(ISize::new(w as i32, h as i32))?;
         let final_canvas = final_surface.canvas();
 
         let mut paint = Paint::default();
         paint.set_anti_alias(true);
         paint.set_shader(liquid_shader);
 
+        final_canvas.translate((-crop_x, -crop_y));
         final_canvas.draw_rect(
             Rect::from_xywh(0.0, 0.0, cap_w as f32, cap_h as f32),
             &paint,
         );
 
-        let rendered = final_surface.image_snapshot();
+        let final_img = final_surface.image_snapshot();
 
-        // Scale back up to full resolution
-        let mut upscale_surface = surfaces::raster_n32_premul(ISize::new(w as i32, h as i32))?;
-        let up_canvas = upscale_surface.canvas();
-        let up_rect = Rect::from_xywh(0.0, 0.0, w as f32, h as f32);
-        let up_sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::None);
-        up_canvas.draw_image_rect_with_sampling_options(
-            &rendered,
-            None,
-            up_rect,
-            up_sampling,
-            &Paint::default(),
-        );
+        let mut border_surface = surfaces::raster_n32_premul(ISize::new(w as i32, h as i32))?;
+        let border_canvas = border_surface.canvas();
+        border_canvas.draw_image(&final_img, (0, 0), None);
 
-        // Border rendering at full res
         let mut outer_border = Paint::default();
         outer_border.set_anti_alias(true);
         outer_border.set_color(Color::from_argb(110, 255, 255, 255));
@@ -321,7 +293,7 @@ fn render_liquid_glass(
             corner_radius,
             corner_radius,
         );
-        up_canvas.draw_rrect(outer_rrect, &outer_border);
+        border_canvas.draw_rrect(outer_rrect, &outer_border);
 
         let inset = 1.0f32;
         let inner_rrect = RRect::new_rect_xy(
@@ -334,8 +306,8 @@ fn render_liquid_glass(
         inner_border.set_color(Color::from_argb(55, 255, 255, 255));
         inner_border.set_style(skia_safe::PaintStyle::Stroke);
         inner_border.set_stroke_width(0.5);
-        up_canvas.draw_rrect(inner_rrect, &inner_border);
+        border_canvas.draw_rrect(inner_rrect, &inner_border);
 
-        Some(upscale_surface.image_snapshot())
+        Some(border_surface.image_snapshot())
     }
 }
