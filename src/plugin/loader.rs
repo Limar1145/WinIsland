@@ -288,13 +288,21 @@ impl ShortcutProvider for NativePlugin {
 
 impl Drop for NativePlugin {
     fn drop(&mut self) {
-        let vtable = self.vtable();
-        // SAFETY: on_unload and destroy are called with the plugin's own handle
+        // SAFETY: vtable was validated on construction and stays valid for
+        // the DLL's lifetime. The function pointer null checks below prevent
+        // calling through potentially-null pointers if the plugin failed to
+        // load after vtable validation (on_unload/destroy may be zero).
+        //
+        // on_unload and destroy are called with the plugin's own handle
         // during drop, which is the correct lifecycle point for cleanup.
-        // The vtable and handle are from the same DLL and remain valid.
+        let vtable = unsafe { &*self.vtable };
         unsafe {
-            let _ = (vtable.on_unload)(self.handle);
-            (vtable.destroy)(self.handle);
+            if vtable.on_unload as usize != 0 {
+                let _ = (vtable.on_unload)(self.handle);
+            }
+            if vtable.destroy as usize != 0 {
+                (vtable.destroy)(self.handle);
+            }
             // C8: manually drop the Library after destroy to ensure the DLL
             // is unloaded last, preserving vtable validity until after all
             // plugin cleanup calls.

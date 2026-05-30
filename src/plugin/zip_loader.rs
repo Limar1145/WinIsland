@@ -119,14 +119,12 @@ pub fn extract_plugin(
             ));
         }
 
-        // C5: reject empty path components, path traversal, ADS, and absolute paths
+        // C5: reject path traversal (..), ADS (colon), absolute paths, and empty names
         if name.split(['/', '\\']).any(|c| c == "..")
             || name.starts_with('/')
             || name.starts_with('\\')
             || name.contains(':')
             || name.is_empty()
-            || name.split(['/', '\\']).any(|c| !c.is_empty() && c == "..")
-            || name.split(['/', '\\']).filter(|c| !c.is_empty()).count() == 0
         {
             return Err(format!("Zip entry '{}' has unsafe path", name));
         }
