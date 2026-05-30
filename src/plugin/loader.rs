@@ -88,10 +88,11 @@ impl NativePlugin {
         let metadata = PluginMetadata::from(&instance.metadata);
 
         // C4: validate plugin ID charset - only alphanumeric, '-', '_'
-        if !metadata
-            .id
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        if metadata.id.is_empty()
+            || !metadata
+                .id
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
         {
             return Err(PluginError::InvalidPlugin(format!(
                 "Plugin '{}' has invalid id: only alphanumeric, '-' and '_' allowed",
