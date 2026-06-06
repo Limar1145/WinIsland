@@ -122,7 +122,8 @@ impl SettingsApp {
             CONTENT_START_Y
         };
         let content_y = my + self.scroll_y;
-        let items = self.build_current_items();
+        self.ensure_items_cache();
+        let items = self.cached_items.clone();
 
         match self.active_page {
             0 => {

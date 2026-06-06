@@ -94,6 +94,7 @@ pub struct App {
     touch_id: Option<u64>,
     touch_pos: PhysicalPosition<f64>,
     plugin_mgr: PluginManager,
+    last_effect_refresh: Instant,
     pending_install: Option<mpsc::Receiver<InstallResult>>,
 }
 
@@ -154,6 +155,7 @@ impl Default for App {
             touch_id: None,
             touch_pos: PhysicalPosition::new(0.0, 0.0),
             plugin_mgr: PluginManager::default(),
+            last_effect_refresh: Instant::now(),
             pending_install: None,
         }
     }
@@ -1002,6 +1004,14 @@ impl ApplicationHandler for App {
                     }
                 }
                 WindowEvent::RedrawRequested => {
+                    // Periodic effect refresh based on effect_refresh_rate
+                    if self.last_effect_refresh.elapsed().as_secs_f32() >= self.config.effect_refresh_rate {
+                        if self.config.island_style == "liquid_glass" {
+                            clear_liquid_glass_cache();
+                        }
+                        self.last_effect_refresh = Instant::now();
+                    }
+                    
                     if let Some(surface) = self.surface.as_mut() {
                         let dt =
                             (self.last_frame_time.elapsed().as_secs_f32() * 60.0).clamp(0.1, 3.0);
@@ -1094,6 +1104,7 @@ impl ApplicationHandler for App {
                                     mini_controls: self.config.mini_controls,
                                     lyrics_delay: self.config.lyrics_delay,
                                     dt,
+                                    effect_refresh_rate: self.config.effect_refresh_rate,
                                 },
                             },
                         );
