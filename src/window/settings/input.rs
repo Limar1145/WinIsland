@@ -237,6 +237,17 @@ impl SettingsApp {
                                 (self.config.update_check_interval + 1.0).min(24.0);
                         }
                         changed = true;
+                    } else if l == tr("effect_refresh_rate") {
+                        if is_dec {
+                            self.config.effect_refresh_rate =
+                                ((self.config.effect_refresh_rate - 0.25) * 100.0).round() / 100.0;
+                            self.config.effect_refresh_rate = self.config.effect_refresh_rate.max(0.25);
+                        } else {
+                            self.config.effect_refresh_rate =
+                                ((self.config.effect_refresh_rate + 0.25) * 100.0).round() / 100.0;
+                            self.config.effect_refresh_rate = self.config.effect_refresh_rate.min(3.0);
+                        }
+                        changed = true;
                     }
                 }
             }

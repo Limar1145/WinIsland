@@ -457,6 +457,11 @@ impl SettingsApp {
                     ],
                     enabled: true,
                 });
+                items.push(SettingsItem::RowStepper {
+                    label: tr("effect_refresh_rate"),
+                    value: format!("{:.2}", self.config.effect_refresh_rate),
+                    enabled: true,
+                });
                 items.push(SettingsItem::RowFontPicker {
                     label: tr("custom_font"),
                     btn_label: tr("font_select"),
