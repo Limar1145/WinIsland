@@ -72,6 +72,7 @@ pub struct StyleParams<'a> {
     pub mini_controls: bool,
     pub lyrics_delay: f64,
     pub dt: f32,
+    pub effect_refresh_rate: f32,
 }
 
 pub struct DrawIslandParams<'a> {
@@ -136,6 +137,7 @@ pub fn draw_island(
         mini_controls: _,
         lyrics_delay,
         dt,
+        effect_refresh_rate,
     } = style;
     let mut buffer = surface.buffer_mut().unwrap();
     let mut sk_surface = SK_SURFACE.with(|cell| {
@@ -255,6 +257,7 @@ pub fn draw_island(
             monitor_y,
             monitor_w,
             monitor_h,
+            (style.effect_refresh_rate * 1000.0) as u64,
         ) {
             let mut paint = Paint::default();
             paint.set_anti_alias(true);

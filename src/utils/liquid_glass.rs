@@ -119,6 +119,7 @@ pub fn get_liquid_glass_background(
     _monitor_y: i32,
     _monitor_w: u32,
     _monitor_h: u32,
+    effect_refresh_rate_ms: u64,
 ) -> Option<Image> {
     if w == 0 || h == 0 {
         return None;
@@ -143,7 +144,7 @@ pub fn get_liquid_glass_background(
     }
 
     // Get or refresh the blurred background capture (keyed by screen position only)
-    let blurred = get_or_capture_background(screen_x, screen_y, w, h)?;
+    let blurred = get_or_capture_background(screen_x, screen_y, w, h, effect_refresh_rate_ms)?;
 
     // Run shader + borders using the (potentially cached) background
     let result = render_liquid_glass(screen_x, screen_y, w, h, corner_radius, &blurred);
@@ -157,8 +158,8 @@ pub fn get_liquid_glass_background(
     result
 }
 
-fn get_or_capture_background(screen_x: i32, screen_y: i32, w: u32, h: u32) -> Option<Image> {
-    // Check BG_CACHE: same position, same dimensions, and less than 5s old
+fn get_or_capture_background(screen_x: i32, screen_y: i32, w: u32, h: u32, effect_refresh_rate_ms: u64) -> Option<Image> {
+    // Check BG_CACHE: same position, same dimensions, and less than effect_refresh_rate old
     let cached = BG_CACHE.with(|cell| {
         let cache = cell.borrow();
         if let Some((img, cx, cy, cw, ch, time)) = cache.as_ref()
@@ -166,7 +167,7 @@ fn get_or_capture_background(screen_x: i32, screen_y: i32, w: u32, h: u32) -> Op
             && *cy == screen_y
             && *cw == w
             && *ch == h
-            && time.elapsed().as_millis() < 5000
+            && time.elapsed().as_millis() < effect_refresh_rate_ms as u128
         {
             return Some(img.clone());
         }
