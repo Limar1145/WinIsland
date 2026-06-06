@@ -147,6 +147,8 @@ pub struct AppConfig {
     pub auto_gate: bool,
     #[serde(default = "default_mini_controls")]
     pub mini_controls: bool,
+    #[serde(default = "default_effect_refresh_rate")]
+    pub effect_refresh_rate: f32,
 }
 
 fn default_island_style() -> String {
@@ -261,6 +263,10 @@ fn default_mini_controls() -> bool {
     false
 }
 
+fn default_effect_refresh_rate() -> f32 {
+    1.0
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -301,6 +307,7 @@ impl Default for AppConfig {
             audio_gate: true,
             auto_gate: true,
             mini_controls: false,
+            effect_refresh_rate: 1.0,
         }
     }
 }
